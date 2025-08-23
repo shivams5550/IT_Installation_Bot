@@ -1,0 +1,26 @@
+# Python packages (Windows)
+fastapi
+uvicorn
+httpx
+aiomysql
+pydantic
+python-dotenv
+pytest
+pytest-asyncio
+loguru
+requests
+botbuilder-core
+botbuilder-dialogs
+botbuilder-schema
+botbuilder-ai
+botbuilder-applicationinsights
+botbuilder-integration-aiohttp
+groq 
+fuzzywuzzy 
+python-Levenshtein
+mysql-connector-python
+langchain
+langgraph
+langchain-groq
+langchain-community
+langchain_mcp_adapters
