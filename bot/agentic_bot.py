@@ -9,7 +9,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from .tools import list_software, install_request
-
+import asyncio
 
 # ---- Graph State ----
 class BotState(TypedDict, total=False):
@@ -20,18 +20,15 @@ class BotState(TypedDict, total=False):
     response_text: Optional[str]
     response_card: Optional[dict]
 
-
 # ---- Helper: build Adaptive Card ----
 def build_adaptive_card(softwares):
     actions = [{"type": "Action.Submit", "title": s["name"], "data": {"software": s["name"]}} for s in softwares]
-    card = {
+    return {
         "type": "AdaptiveCard",
         "body": [{"type": "TextBlock", "text": "Select software to install:", "weight": "Bolder"}],
         "actions": actions,
         "version": "1.4"
     }
-    return card
-
 
 # ---- Agentic Bot (LangGraph) ----
 class AgenticBot:
@@ -40,10 +37,9 @@ class AgenticBot:
         if not api_key:
             raise ValueError("GROQ_API_KEY is not set.")
 
-        # LLM used for (a) intent classification JSON and (b) general IT answers
         self.llm = ChatGroq(model="gemma2-9b-it", api_key=api_key)
 
-        # Preload catalog for fuzzy-match context
+        # Preload catalog synchronously
         self.catalog = list_software()
         self.catalog_names = [s["name"] for s in self.catalog]
 
@@ -74,6 +70,12 @@ class AgenticBot:
         # Prefer card if present
         if final.get("response_card"):
             return final["response_card"]
+
+        # If install, run async install_request
+        if final.get("intent") == "install" and final.get("software"):
+            msg = await install_request(user_name=user_name, software_name=final["software"])
+            final["response_text"] = msg
+
         return final.get("response_text", "Sorry, something went wrong.")
 
     # ---- Node: classify intent & extract software (LLM + fuzzy fallback) ----
@@ -101,7 +103,6 @@ class AgenticBot:
             intent = data.get("intent", "other")
             software = data.get("software") or ""
         except Exception:
-            # If LLM parse fails, rule-based fallback
             lt = user_text.lower()
             if "what" in lt and "software" in lt and ("can i install" in lt or "available" in lt or "list" in lt):
                 intent, software = "list_all", ""
@@ -110,21 +111,20 @@ class AgenticBot:
             else:
                 intent, software = "other", ""
 
-        # Fuzzy match if we think it's an install and software is present/guessable
+        # Fuzzy match if we think it's an install
         if intent == "install":
             guess = None
             if software:
                 match, score = process.extractOne(software, self.catalog_names)
                 guess = match if score >= 70 else None
             else:
-                # try to find any catalog name mentioned inside the text
                 match, score = process.extractOne(user_text, self.catalog_names)
                 guess = match if score >= 70 else None
             software = guess or software or ""
 
-        state["intent"] = intent  # type: ignore
+        state["intent"] = intent
         if software:
-            state["software"] = software  # type: ignore
+            state["software"] = software
         return state
 
     # ---- Router ----
@@ -135,19 +135,15 @@ class AgenticBot:
     def _handle_install_node(self, state: BotState) -> BotState:
         sw = state.get("software", "")
         if sw:
-            # Direct install request (no card)
-            msg = install_request(user_name=state["user_name"], software_name=sw)
-            state["response_text"] = msg
+            # Message will be handled asynchronously in handle_message
+            state["response_text"] = f"Processing install request for {sw}..."
             return state
-
-        # No software extracted: ask user OR show list? We’ll ask, to keep UX simple.
         state["response_text"] = "Which software would you like to install?"
         return state
 
     # ---- Node: list all (Adaptive Card) ----
     def _handle_list_all_node(self, state: BotState) -> BotState:
-        card = build_adaptive_card(self.catalog)
-        state["response_card"] = card
+        state["response_card"] = build_adaptive_card(self.catalog)
         return state
 
     # ---- Node: general IT answers (LLM) ----

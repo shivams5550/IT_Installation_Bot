@@ -40,7 +40,6 @@ def get_software_list():
 
 
 def populate_software_catalog():
-    """Populate initial software catalog if empty"""
     initial_software = [
         {"name": "Google Chrome", "winget_id": "Google.Chrome", "default_version": "latest"},
         {"name": "Visual Studio Code", "winget_id": "Microsoft.VisualStudioCode", "default_version": "latest"},
@@ -80,14 +79,15 @@ def populate_software_catalog():
 def log_request(user_name, software_name, winget_id):
     conn = get_connection()
     if not conn:
-        return False
+        return None
     cursor = conn.cursor()
     sql = "INSERT INTO requests (user_name, software_name, winget_id) VALUES (%s, %s, %s)"
     cursor.execute(sql, (user_name, software_name, winget_id))
+    request_id = cursor.lastrowid  # Return the inserted request ID
     conn.commit()
     cursor.close()
     conn.close()
-    return True
+    return request_id
 
 
 def update_request_status(request_id, status):
@@ -104,15 +104,30 @@ def update_request_status(request_id, status):
 
 
 # ------------------ ServiceNow Sync ------------------
-def update_request_servicenow(request_id, ticket_id):
-    """Link request with its ServiceNow ticket (maps to servicenow_ticket_id column)."""
+def update_request_servicenow(request_id: int, incident_id: str, incident_number: str):
     conn = get_connection()
     if not conn:
         return False
     cursor = conn.cursor()
-    sql = "UPDATE requests SET servicenow_ticket_id=%s WHERE id=%s"
-    cursor.execute(sql, (ticket_id, request_id))
+    cursor.execute("""
+        UPDATE requests
+        SET servicenow_ticket_id=%s,
+            servicenow_ticket_number=%s
+        WHERE id=%s
+    """, (incident_id, incident_number, request_id))
     conn.commit()
     cursor.close()
     conn.close()
     return True
+
+
+def get_request_by_id(request_id: int):
+    conn = get_connection()
+    if not conn:
+        return None
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM requests WHERE id=%s", (request_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return result

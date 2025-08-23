@@ -101,3 +101,4 @@ if __name__ == "__main__":
     import uvicorn
     print("🚀 Bot server running at http://127.0.0.1:3978/api/messages")
     uvicorn.run("app:app", host="127.0.0.1", port=3978, reload=True)
+
