@@ -4,9 +4,11 @@ from fastapi import FastAPI, Request
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext
 from botbuilder.schema import Activity, Attachment
 from dotenv import load_dotenv
+import asyncio
 
 from bot.agentic_bot import AgenticBot
 from bot.db import get_software_list, log_request
+from bot.tools import install_request
 
 load_dotenv()
 app = FastAPI()
@@ -29,7 +31,6 @@ def get_winget_id(software_name: str):
             return s["winget_id"]
     return None
 
-# Adaptive Card helper (optional, for manual building)
 def build_adaptive_card(softwares):
     actions = [{"type": "Action.Submit", "title": s["name"], "data": {"software": s["name"]}} for s in softwares]
     return {
@@ -44,7 +45,6 @@ async def on_message(turn_context: TurnContext):
     text = turn_context.activity.text or ""
     user_name = turn_context.activity.from_property.name
 
-    # Handle Adaptive Card submission
     if turn_context.activity.value:
         data = turn_context.activity.value
         software_name = data.get("software")
@@ -56,7 +56,6 @@ async def on_message(turn_context: TurnContext):
             await turn_context.send_activity("No software selected.")
         return
 
-    # Route through LangGraph bot
     result = await BOT.handle_message(text, user_name)
 
     if isinstance(result, dict) and result.get("type") == "AdaptiveCard":
@@ -69,16 +68,10 @@ async def on_message(turn_context: TurnContext):
     else:
         await turn_context.send_activity(result)
 
-
 async def on_conversation_update(turn_context: TurnContext):
-    """
-    Handle new conversation start.
-    Right now: do NOT send catalog. Optionally send a short greeting.
-    """
     if turn_context.activity.members_added:
         for member in turn_context.activity.members_added:
             if member.id != turn_context.activity.recipient.id:
-                # 🔹 Only greeting, no catalog
                 await turn_context.send_activity("👋 Hi! I’m your IT assistant. How can I help you today?")
 
 # ---- Endpoint ----
@@ -92,13 +85,10 @@ async def messages(req: Request):
         await adapter.process_activity(activity, auth_header, on_message)
     elif activity.type == "conversationUpdate":
         await adapter.process_activity(activity, auth_header, on_conversation_update)
-    # ignore other event types
 
     return {}
 
-# ---- Local run ----
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Bot server running at http://127.0.0.1:3978/api/messages")
     uvicorn.run("app:app", host="127.0.0.1", port=3978, reload=True)
-

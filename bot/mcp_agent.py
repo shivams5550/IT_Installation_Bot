@@ -26,7 +26,8 @@ class ServiceNowAgent:
     async def load_tools(self):
         if self.tools is None:
             tools = await self.client.get_tools()
-            self.tools = {t.name: t for t in tools if t.name in ("create_incident", "update_incident")}
+            # Only incident-related tools
+            self.tools = {t.name: t for t in tools if t.name in ("create_incident", "update_incident", "resolve_incident")}
         return self.tools
 
     async def handle_request(self, request_id: int, user_name: str, software_name: str) -> dict:
@@ -51,27 +52,24 @@ class ServiceNowAgent:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    async def approve_request(self, request_id: int, ticket_id: str, supervisor_name: str):
+    async def resolve_request(self, request_id: int, ticket_id: str, resolver_name: str):
         await self.load_tools()
-        update_tool = self.tools.get("update_incident")
-        if not update_tool:
-            return {"success": False, "message": "update_incident tool not available."}
-        try:
-            await update_tool.ainvoke({"incident_id": ticket_id, "fields": {"state": "2", "comments": f"Approved by {supervisor_name}"}})
-            update_request_status(request_id, "approved")
-            return {"success": True}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+        resolve_tool = self.tools.get("resolve_incident")
+        if not resolve_tool:
+            return {"success": False, "message": "resolve_incident tool not available."}
 
-    async def reject_request(self, request_id: int, ticket_id: str, supervisor_name: str):
-        await self.load_tools()
-        update_tool = self.tools.get("update_incident")
-        if not update_tool:
-            return {"success": False, "message": "update_incident tool not available."}
         try:
-            await update_tool.ainvoke({"incident_id": ticket_id, "fields": {"state": "7", "comments": f"Rejected by {supervisor_name}"}})
-            update_request_status(request_id, "rejected")
-            return {"success": True}
+            # ✅ Match your working sn_client_test_fixed.py call
+            resp = await resolve_tool.ainvoke({
+                "incident_id": ticket_id,
+                "resolution_code": "Resolved by caller",        # dummy value for validation
+                "resolution_notes": f"Resolved via bot by {resolver_name}"
+            })
+            if isinstance(resp, str):
+                resp = json.loads(resp)
+
+            update_request_status(request_id, "installed")
+            return {"success": True, "response": resp}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
@@ -81,11 +79,6 @@ async def create_incident_for_request(request_id, user_name, software_name):
     agent = ServiceNowAgent()
     return await agent.handle_request(request_id, user_name, software_name)
 
-async def approve_request_in_servicenow(request_id, ticket_id, supervisor_name):
+async def resolve_request_in_servicenow(request_id, ticket_id, resolver_name):
     agent = ServiceNowAgent()
-    return await agent.approve_request(request_id, ticket_id, supervisor_name)
-
-async def reject_request_in_servicenow(request_id, ticket_id, supervisor_name):
-    agent = ServiceNowAgent()
-    return await agent.reject_request(request_id, ticket_id, supervisor_name)
-
+    return await agent.resolve_request(request_id, ticket_id, resolver_name)

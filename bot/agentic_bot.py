@@ -2,14 +2,11 @@
 import os
 import json
 from typing import TypedDict, Optional, Literal
-
 from fuzzywuzzy import process
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
-
 from .tools import list_software, install_request
-import asyncio
 
 # ---- Graph State ----
 class BotState(TypedDict, total=False):
@@ -20,7 +17,6 @@ class BotState(TypedDict, total=False):
     response_text: Optional[str]
     response_card: Optional[dict]
 
-# ---- Helper: build Adaptive Card ----
 def build_adaptive_card(softwares):
     actions = [{"type": "Action.Submit", "title": s["name"], "data": {"software": s["name"]}} for s in softwares]
     return {
@@ -30,7 +26,6 @@ def build_adaptive_card(softwares):
         "version": "1.4"
     }
 
-# ---- Agentic Bot (LangGraph) ----
 class AgenticBot:
     def __init__(self, groq_api_key: Optional[str] = None):
         api_key = groq_api_key or os.getenv("GROQ_API_KEY")
@@ -38,19 +33,15 @@ class AgenticBot:
             raise ValueError("GROQ_API_KEY is not set.")
 
         self.llm = ChatGroq(model="gemma2-9b-it", api_key=api_key)
-
-        # Preload catalog synchronously
         self.catalog = list_software()
         self.catalog_names = [s["name"] for s in self.catalog]
 
-        # Build graph
         graph = StateGraph(BotState)
         graph.add_node("classify", self._classify_node)
         graph.add_node("handle_install", self._handle_install_node)
         graph.add_node("handle_list_all", self._handle_list_all_node)
         graph.add_node("handle_other", self._handle_other_node)
 
-        # Edges
         graph.set_entry_point("classify")
         graph.add_conditional_edges("classify", self._route_from_intent, {
             "install": "handle_install",
@@ -63,25 +54,21 @@ class AgenticBot:
 
         self.app = graph.compile()
 
-    # ---- Public: handle one message ----
     async def handle_message(self, text: str, user_name: str):
         state: BotState = {"user_text": text, "user_name": user_name}
         final = self.app.invoke(state)
-        # Prefer card if present
+
         if final.get("response_card"):
             return final["response_card"]
 
-        # If install, run async install_request
         if final.get("intent") == "install" and final.get("software"):
             msg = await install_request(user_name=user_name, software_name=final["software"])
             final["response_text"] = msg
 
         return final.get("response_text", "Sorry, something went wrong.")
 
-    # ---- Node: classify intent & extract software (LLM + fuzzy fallback) ----
     def _classify_node(self, state: BotState) -> BotState:
         user_text = state["user_text"]
-
         system = SystemMessage(
             content=(
                 "You are an IT assistant that classifies user messages. "
@@ -95,7 +82,6 @@ class AgenticBot:
             )
         )
         human = HumanMessage(content=f"User message: {user_text}\nAvailable software: {', '.join(self.catalog_names)}")
-
         try:
             out = self.llm.invoke([system, human])
             txt = (out.content or "").strip()
@@ -111,7 +97,6 @@ class AgenticBot:
             else:
                 intent, software = "other", ""
 
-        # Fuzzy match if we think it's an install
         if intent == "install":
             guess = None
             if software:
@@ -127,34 +112,23 @@ class AgenticBot:
             state["software"] = software
         return state
 
-    # ---- Router ----
     def _route_from_intent(self, state: BotState):
         return state.get("intent", "other")
 
-    # ---- Node: handle install ----
     def _handle_install_node(self, state: BotState) -> BotState:
         sw = state.get("software", "")
         if sw:
-            # Message will be handled asynchronously in handle_message
             state["response_text"] = f"Processing install request for {sw}..."
             return state
         state["response_text"] = "Which software would you like to install?"
         return state
 
-    # ---- Node: list all (Adaptive Card) ----
     def _handle_list_all_node(self, state: BotState) -> BotState:
         state["response_card"] = build_adaptive_card(self.catalog)
         return state
 
-    # ---- Node: general IT answers (LLM) ----
     def _handle_other_node(self, state: BotState) -> BotState:
-        system = SystemMessage(
-            content=(
-                "You are a helpful IT assistant. "
-                "Answer clearly and concisely. "
-                "Do NOT offer to list software unless the user asks."
-            )
-        )
+        system = SystemMessage(content="You are a helpful IT assistant. Answer clearly and concisely.")
         human = HumanMessage(content=state["user_text"])
         try:
             out = self.llm.invoke([system, human])
