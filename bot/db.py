@@ -131,3 +131,15 @@ def get_request_by_id(request_id: int):
     cursor.close()
     conn.close()
     return result
+
+def mark_request_installed(request_id: int):
+    conn = get_connection()
+    if not conn:
+        return False
+    cursor = conn.cursor()
+    sql = "UPDATE requests SET status='installed' WHERE id=%s"
+    cursor.execute(sql, (request_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return True

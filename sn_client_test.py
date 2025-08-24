@@ -66,11 +66,11 @@ async def main():
         resolve_response = json.loads(resolve_response)
     print("Resolve Incident Response:", resolve_response)
 
-    # # ---- 4️⃣ List incidents to confirm ----
-    # list_response = await list_tool.ainvoke({})
-    # if isinstance(list_response, str):
-    #     list_response = json.loads(list_response)
-    # print("List Incidents Response:", list_response)
+    # ---- 4️⃣ List incidents to confirm ----
+    list_response = await list_tool.ainvoke({})
+    if isinstance(list_response, str):
+        list_response = json.loads(list_response)
+    print("List Incidents Response:", list_response)
 
 # Run
 asyncio.run(main())
